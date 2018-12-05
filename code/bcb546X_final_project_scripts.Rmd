@@ -1,0 +1,195 @@
+---
+title: "BCB546X_final_project_scripts"
+author: "Zihao_Zheng"
+date: "12/5/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### 1.Number of GWAS hits for every trait
+In the first analysis, we are going to count the GWAS hits for each trait. For the introduction of phenotype and genotype data, please see [project introduction](https://github.com/zhzheng92/BCB546X-Fall2018-Perplexed-Pythons/blob/master/data/Zheng_Riaz_Nessel_2018.md) and [data availability](https://github.com/zhzheng92/BCB546X-Fall2018-Perplexed-Pythons/blob/master/data/data_availability.md)
+
+1. ~2.1 millions SNPs from [Kusmec et al. 2017](https://www.nature.com/articles/s41477-017-0007-7) were pre-downloaded and formated as .hmp format. In order to perform GWAS with FarmCPU model using software [FarmCPUpp](https://github.com/amkusmec/FarmCPUpp),the .hmp file needs to be converted into [.xmat](https://github.com/amkusmec/snptools/blob/master/example/example.xmat) and [.map](https://github.com/amkusmec/snptools/blob/master/example/test.map) format. This can be down by using softwre [snptools](https://github.com/amkusmec/snptools)
+
+```{bash}
+# clone the Github page
+git clone https://github.com/amkusmec/snptools
+# use the script numericalize.py to convert .hmp to .xmat and .map
+python3 numericalize.py -i NAM_2M.hmp -o NAM_2M -mi 1
+```
+
+2. Calculate covariates (PCA) for GWAS, using software [tassel](http://www.maizegenetics.net/tassel).
+
+```{bash}
+
+./run_pipeline.pl -Xmx100g -fork1 -importGuess NAM_2M.hmp -PrincipalComponentsPlugin -covariance true -endPlugin -export NAM_2M.PCA -runfork1
+
+# take only the first three PCA as covariates
+
+cut -f1-4 NAM_2M.PCA > NAM_2M.cov
+
+```
+
+3. Conduct GWAS using [FarmCPUpp](https://github.com/amkusmec/FarmCPUpp). This process is the same for all the 41 traits. The format of phenotype file should follow the requirements of [FarmCPUpp](https://github.com/amkusmec/FarmCPUpp).
+
+```{r}
+setwd("~/zhzheng/bcb546x_final_peoject/NAM_GWAS/")
+
+library(bigmemory)
+library(FarmCPUpp) # these two packages should be installed if not yet
+library(tidyverse)
+library(readxl)
+# load phenotype data
+pheno <- read.csv("NAM_traits.csv") 
+
+# load genotype data
+
+myGM <- read.table("NAM_2M.map",
+                   header = TRUE, stringsAsFactors = FALSE)
+
+myGD <- read.big.matrix("NAM_2M.xmat",
+                        type = "double", sep = "\t", header = TRUE,
+                        col.names = myGM$SNP, ignore.row.names = FALSE,
+                        has.row.names = TRUE, backingfile = "NAM_2M.bin",
+                        descriptorfile = "NAM_2M.desc")
+
+# load covariates 
+myCV <- read.table("NAM_2M.cov",header = T, sep = "\t")
+row.names(myCV) <- myCV[,1] # format the covariates file
+myCV <- myCV[,-1]
+myCV <- myCV[1:3]
+
+# start GWAS for the 41 traits, this takes ~ 1 week of computation
+
+for (i in 2:42){
+  
+myY = tmp[,c(1,i)]
+    
+myResults <- farmcpu(Y = myY, GD = myGD, GM = myGM, CV = myCV, method.bin = "optimum", bin.size = c(3000,5000,10000,15000))
+write_results(myResults)
+}
+
+
+```
+
+4. Once the GWAS is done, start to work with the GWAS results file. In this project, we use Bonferroni correction (p<0.05) as cutoff to get significant hits. And calculate [stanardized effect size](https://www.theanalysisfactor.com/two-types-effect-size-statistic/) for all significant SNPs. Below is an example for trait sucrose.
+
+```{r}
+sucrose <- read.csv("Sucrose_Blup.GWAS.csv")
+sucrose_sig <- subset(sucrose,sucrose$p.value < 2.03898e-08)
+sucrose_sig$trait <- "sucrose"
+
+# calculate effect size for the significant SNPs
+sucrose_sd <- sd(NAM_traits$Sucrose_Blup)
+sucrose_sig$effect_size_abs <- abs(sucrose_sig$estimate/sucrose_sd)
+
+```
+
+Combine all the significant hits and we got [NAM_traits_signifiant_hits.csv](https://github.com/zhzheng92/BCB546X-Fall2018-Perplexed-Pythons/blob/master/data/NAM_traits_signifiant_hits.csv).Visualiztion of the results please see codes in the **code** directory
+
+### 2.Relationship of minor allele frequencies (MAF) and effect size of all the TAS
+
+To calculate the MAF for all trait associated SNPs(TAS), again we used [snptools](https://github.com/amkusmec/snptools)
+
+```{bash}
+# calcuate statistics for all input SNPs in GWAS, including MAF
+python3 snpstat.py -i NAM_2M.hmp.txt -o NAM_2M.stat -mi 2
+
+```
+
+Once we got the statistics including MAF, merge the NAM_2M.stat with our GWAS hits file
+
+```{r}
+effect_size_maf <- merge(NAM_traits_signifiant_hits,NAM_2M.stat,by = "snpid")
+effect_size_maf<- effect_size_maf %>% select(snpid,Chromosome,Position,maf,effect_size_abs)
+```
+The final file is [effect_size_maf.csv](https://github.com/tnessel/BCB546X-Fall2018-Perplexed-Pythons/blob/master/data/effect_size_maf.csv). Visualiztion of the results please see codes in the **code** directory.
+
+### 3.Expressioin pattern of candidate genes identified in GWAS
+
+The next step is to find genes near the GWAS hits. In this analysis, we use 10kb as window size centered as the TAS to look for genes. This is done by using software [bedtools](https://bedtools.readthedocs.io/en/latest/). A pre-prepared .bed file that has all the maize gene(version 2) and their position can be found [maize_genes_V2_annotation.sorted.bed](https://github.com/zhzheng92/BCB546X-Fall2018-Perplexed-Pythons/blob/master/data/maize_genes_V2_annotation.sorted.bed)
+
+1. format the GWAS hits file into .bed file
+```{r}
+tmp <- NAM_traits_signifiant_hits %>% select(Chromosome,Position)
+tmp <- tmp %>% mutate(StartPosition = Position - 5000,EndPosition = Position + 5000)
+tmp <- tmp %>% select(Chromosome,StartPosition,EndPosition)
+tmp <- tmp[order(tmp$Chromosome,tmp$StartPosition),] # sort the .bed file to meet the requirement of bedtools
+write_delim(tmp,"NAM_GWAS_hits.bed",delim = "\t",col_names = F)
+
+```
+
+2. find genes within the 10kb window with bedtools
+
+```{bash}
+bedtools intersect -a NAM_GWAS_hits.bed -b maize_genes_V2_annotation.sorted.bed -wa -wb > NAM_gene.txt
+```
+
+Take out the unique genes from the file
+
+```{r}
+NAM_gene <- read_delim("NAM_gene.txt",col_names = F,delim = ";")
+NAM_gene$X2<- gsub("Name=","",NAM_gene$X2)
+NAM_gene_uniqe <- data.frame(unique(NAM_gene$X2))
+colnames(NAM_gene_uniqe)[1] <- "geneid"
+
+```
+
+Get the expression data for these genes. First we need to download and format the gene expression file
+
+```{r}
+# Download files from Science ---------------------------------------------
+# (Only need to run this section once.)
+download.file("http://science.sciencemag.org/highwire/filestream/683104/field_highwire_adjunct_files/1/aag1125_SupportingFile_Table_S1.xlsx",
+              destfile = "walley2016_mrna.xlsx")
+download.file("http://science.sciencemag.org/highwire/filestream/683104/field_highwire_adjunct_files/3/aag1125_SupportingFile_Table_S2.xlsx",
+              destfile = "walley2016_protein.xlsx")
+
+
+# Reformat the mRNA data --------------------------------------------------
+mrna <- read_excel("walley2016_mrna.xlsx", sheet = 2)
+names(mrna) <- make.names(names(mrna))
+mrna <- mrna %>%
+  filter(Gene_Set == "filtered_set") %>%
+  select(-Gene_Set, -gene_biotype, -Classical.Maize.Gene, -Syntany.) %>%
+  gather(key = "Tissue", value = "Measure",
+         Female.Spikelet.Collected.on.day.as.silk:Secondary.Root.7.8.Days) %>%
+  rename(GeneID = tracking_id) %>%
+  mutate(Type = "mRNA") %>%
+  filter(Measure > 0)
+
+```
+
+Get the expression data for candidate genes from GWAS.
+```{r}
+# transform the rpkm value
+mrna$Measure_log <- log10(mrna$Measure)
+
+expression <- subset(mrna,mrna$GeneID %in% NAM_gene_uniqe$geneid)
+write_csv(expression,"NAM_gene_expression.csv")
+
+```
+
+The file that contains the candiate genes' expression in multiple tissues is [NAM_gene_expression.csv](https://github.com/zhzheng92/BCB546X-Fall2018-Perplexed-Pythons/blob/master/data/NAM_gene_expression.csv). Visualiztion of the results please see codes in the **code** directory.
+
+
+### 4. Enrichment of candidate genes in the two maize sub-genomes
+
+Finally, we want to check how many of the candidate genes are in maize subgenome1 and subgenome2. The table that has the genes from maize subgenome1 and subgenome2 were downloaed from [here](http://schnablelab.org/data/), can a formatted file can be found [NAM_gene_sub_genome.csv](https://github.com/zhzheng92/BCB546X-Fall2018-Perplexed-Pythons/blob/master/data/NAM_gene_sub_genome.csv)
+
+```{r}
+sugenome_table <- read_csv("NAM_gene_sub_genome.csv")
+
+NAM_maize1<- subset(NAM_gene_uniqe,NAM_gene_uniqe$geneid %in% sugenome_table$maize1_v2)
+NAM_maize2<- subset(NAM_gene_uniqe,NAM_gene_uniqe$geneid %in% sugenome_table$maize2_v2)
+NAM_maize1$note <- "subgenome1"
+NAM_maize2$note <- "subgenome2"
+tmp <- rbind(NAM_maize1,NAM_maize2)
+write_csv(tmp,"NAM_gene_sub_genome.csv")
+
+```
+
+The file that contains the candiate genes' classification in the two maize sub-genome is  [NAM_gene_sub_genome.csv](https://github.com/zhzheng92/BCB546X-Fall2018-Perplexed-Pythons/blob/master/data/NAM_gene_sub_genome.csv). Visualiztion of the results please see codes in the **code** directory.
