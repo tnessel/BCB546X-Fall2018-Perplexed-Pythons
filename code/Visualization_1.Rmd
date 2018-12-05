@@ -27,17 +27,14 @@ NAM_effect_size <- read.table("../data/effect_size_maf.csv", header = TRUE, sep 
 
 To visualize the proportion of SNP_ID enrichment for each phenotypic trait, we will create a barplot in ggplot. 
 
-We have to manipulate the y axis counts in order to get a proportion (cite https://stackoverflow.com/questions/36604127/creating-a-bar-plot-with-proportions-on-ggplot)
-
 We also have to rotate the x axis for readability (cite https://stackoverflow.com/questions/1330989/rotating-and-spacing-axis-labels-in-ggplot2)
 
 ```{r}
 q <- ggplot(NAM_traits_signifiant_hits, aes(trait)) +
-  geom_bar(aes(y=..count../sum(..count..))) +
-  scale_y_continuous(labels=percent_format())  #For proportion count y axis
+  geom_bar()
 q + theme(axis.text.x = element_text(angle = 90, hjust = 1)) + ggtitle("Proportion Variance Explained Replication") +
   xlab("Trait") +
-  ylab("Proportion Variance Explained") # for the main and axis titles and For tilted x axis 
+  ylab("Count") # for the main and axis titles and For tilted x axis 
 ```
 
 To visualize allele frequency vs effect size, we'll make a scatterplot with ggplot; with Minor Allele Frequency plotted along the x axis and effect size plotted along the y axis. We can use geom_smooth to creat a fitted line, and also use transparency to show overlap.
@@ -49,6 +46,30 @@ ggplot(data = NAM_effect_size, mapping = aes(x=maf, y=effect_size_abs)) +
     xlab("Minor Allele Frequency") +
     ylab("Effect Size") #gives main title and axis labels
   
+```
+
+```{r NAM_GE_Density_Plot}
+NAM_GE <- read_csv("../data/NAM_gene_expression.csv")
+ggplot(data = NAM_GE) + geom_density(mapping = aes(x=Measure_log, fill=Tissue), alpha=0.2) + labs(title= "Distribution of gene expression values", x= "log10(RPKM)", y= "Density") ##Used geom_density() to create separate density plots for gene expression values, grouped by tissue type
+
+##Histogram without Tissue fill to show the density of log expression values (not added to analysis) "ggplot(NAM_GE, aes(x=Measure_log)) + geom_histogram(aes(y=..density..), binwidth=.5, colour="black", fill="white") + geom_density(alpha=.2, fill="#FF6666")" 
+```
+
+Plot for 2 b: Comparison of paralogous and non paralogous genes
+
+```{r subgenomes}
+NAM_subgenome <- read_csv("../data/NAM_gene_sub_genome.csv")
+colnames(NAM_subgenome)[2] <- "subgenome" 
+ggplot(NAM_subgenome, aes(x=factor(1), fill=subgenome))+ geom_bar(width = 1)+ coord_polar("y")+ labs(x= "candidate gene") ##Pie chart for candidate gene enrichment in subgenomes 1 and 2 using subgenome as a factor variable
+
+genes <- c(14636, 9168)
+lbls <- c("subgenome 1", "subgenome 2")
+pielabels<- paste(genes)
+cols <- c("grey90","grey50")
+pie(genes, main="Total genes in subgenomes 1 and 2", col=cols, labels=pielabels, cex=0.8)
+legend("topright", c("subgenome 1", "subgenome 2"), cex=0.8, fill=cols)
+##Basic pie chart function in R to plot the ratio of total no. of genes in subgenomes 1 and 2 for comparison with the candidate genes
+
 ```
 
 
