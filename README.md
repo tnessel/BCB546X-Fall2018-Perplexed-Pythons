@@ -10,9 +10,9 @@ This repository contains the final project for the group "Perplexed Pythons" dur
 
 The group aims to replicate some of the analysis presented in **Wallace\_et\_al.PDF**, presented in the home directory. 
 
-An introduction to the paper, as well as details and a summary of the replication and results can be found in **Wallace\_et\_al\_2014.md**
+An introduction to the paper, as well as details and a summary of the replication and results can be found in ** Zheng_Riaz_Nessel_2018.md **
 
-`code/` contains scripts and code used in the analysis
+`code/` contains scripts and code used in the analysis (**bcb546X\_final\_project\_scripts.Rmd**)
 
-`data/` contains the raw data download instruction file and any result files of the analysis
+`data/` contains the raw data download instruction (**data\_availability.md**) file and any result files of the analysis
 
